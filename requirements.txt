@@ -1,0 +1,4 @@
+python-dotenv
+certifi
+pytest
+pytest-mock
