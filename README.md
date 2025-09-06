@@ -11,10 +11,13 @@ A simple Python wrapper for the Cato Networks GraphQL API that provides easy-to-
 - ✅ Debug mode for API request/response inspection
 - ✅ Full container lifecycle management (create, list, delete)
 - ✅ Support for both IP address and FQDN containers
+- ✅ **Value management** - add and remove IP ranges and FQDNs with cache synchronization
+- ✅ **Container content inspection** - view individual items in containers with cache timestamps
 - ✅ **SQLite caching layer** with timestamp tracking and duplicate detection
 - ✅ **Smart API optimization** - cache hits skip redundant API calls
 - ✅ **Cache management utilities** - view, purge, and maintain cached data
 - ✅ **Enhanced container listing** with cache status information
+- ✅ **Write-through caching** - container creation immediately updates cache
 - ✅ Extensive test coverage with pytest (70+ tests)
 
 ## Installation
@@ -76,6 +79,13 @@ api.container_add_ip_range(
 api.container_add_ip_range(
     container_name="Blocked IPs", 
     from_ip="203.0.113.1",
+    to_ip="203.0.113.100"
+)
+
+# Remove IP range - also removes from cache
+api.container_remove_ip_range(
+    container_name="Blocked IPs",
+    from_ip="203.0.113.1", 
     to_ip="203.0.113.100"
 )
 
@@ -305,6 +315,39 @@ python examples/add_fqdns.py --container "Blocked Domains" --fqdns "malware.com,
 python examples/add_fqdns.py --container "Corporate Domains" --fqdns-file ./domains.txt
 ```
 
+### Remove IP Range from Container
+```bash
+# Remove a single IP address
+python examples/remove_ip_range.py --container "Blocked IPs" --from-ip "192.168.1.100" --to-ip "192.168.1.100"
+
+# Remove an IP range
+python examples/remove_ip_range.py --container "Allowed IPs" --from-ip "10.0.0.1" --to-ip "10.0.0.255"
+```
+
+### Remove FQDNs from Container
+```bash
+# Remove multiple FQDNs
+python examples/remove_fqdns.py --container "Blocked Domains" --fqdns "malware.com,phishing.net"
+
+# Remove from file
+python examples/remove_fqdns.py --container "Corporate Domains" --fqdns-file ./domains_to_remove.txt
+```
+
+### List Container Contents with Cache Information
+```bash
+# Show contents of a specific container with cache status
+python examples/list_container.py --name "My Container"
+
+# Table format for better readability
+python examples/list_container.py --name "Blocked IPs" --format table
+
+# JSON output for scripting
+python examples/list_container.py --name "Corporate Domains" --format json
+
+# Disable cache to see container info only
+python examples/list_container.py --name "Test Container" --no-cache
+```
+
 ### Create FQDN Container  
 ```bash
 # With initial FQDNs
@@ -360,8 +403,10 @@ The wrapper includes a powerful SQLite-based caching system that provides signif
 2. **Duplicate Detection**: Automatically skips adding duplicate entries
 3. **Smart FQDN Handling**: Filters out cached FQDNs, only sends new ones
 4. **Remove Synchronization**: Remove operations delete entries from cache
-5. **Timestamp Management**: Tracks both addition and last-seen timestamps
-6. **Container List Enhancement**: Shows cache status for each container
+5. **Write-Through Caching**: Container creation immediately updates cache
+6. **Timestamp Management**: Tracks both addition and last-seen timestamps
+7. **Container List Enhancement**: Shows cache status for each container
+8. **Content Inspection**: View individual container items with cache timestamps
 
 ### Cache Configuration
 ```python

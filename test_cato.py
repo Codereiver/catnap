@@ -1813,6 +1813,98 @@ class TestAPICache:
         assert stats_after['cached_ip_ranges'] == 0
         assert stats_after['cached_fqdns'] == 0
         assert stats_after['total_cached'] == 0
+    
+    def test_container_create_ip_write_through_cache(self, api_with_cache, mocker):
+        """Test that container_create_ip uses write-through caching"""
+        # Mock successful container creation response
+        mock_response = {
+            "data": {
+                "container": {
+                    "ipAddressRange": {
+                        "createFromFile": {
+                            "container": {
+                                "id": "12345",
+                                "name": "Test Write Through",
+                                "__typename": "IpAddressRangeContainer",
+                                "size": 2
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        mocker.patch.object(api_with_cache, 'send_multipart', return_value=mock_response)
+        
+        # Create container with initial IPs
+        api_with_cache.container_create_ip(
+            "Test Write Through",
+            "Test description",
+            ["192.168.1.1", "10.0.0.1-10.0.0.10"]
+        )
+        
+        # Verify API was called
+        api_with_cache.send_multipart.assert_called_once()
+        
+        # Verify cache was updated
+        cache_stats = api_with_cache.container_cache_stats("Test Write Through")
+        assert cache_stats['cached_ip_ranges'] == 2
+        assert cache_stats['type'] == 'ip'
+        assert cache_stats['api_size'] == 2
+        
+        # Verify cached values
+        cached_values = api_with_cache.container_list_cached_values("Test Write Through")
+        assert len(cached_values['ip_ranges']) == 2
+        
+        # Check individual ranges
+        ip_ranges = {(r['from_ip'], r['to_ip']) for r in cached_values['ip_ranges']}
+        assert ('192.168.1.1', '192.168.1.1') in ip_ranges
+        assert ('10.0.0.1', '10.0.0.10') in ip_ranges
+    
+    def test_container_create_fqdn_write_through_cache(self, api_with_cache, mocker):
+        """Test that container_create_fqdn uses write-through caching"""
+        # Mock successful container creation response
+        mock_response = {
+            "data": {
+                "container": {
+                    "fqdn": {
+                        "createFromFile": {
+                            "container": {
+                                "id": "67890",
+                                "name": "Test FQDN Write Through",
+                                "__typename": "FqdnContainer",
+                                "size": 2
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        mocker.patch.object(api_with_cache, 'send_multipart', return_value=mock_response)
+        
+        # Create FQDN container with initial domains
+        api_with_cache.container_create_fqdn(
+            "Test FQDN Write Through",
+            "Test FQDN description",
+            ["example.com", "test.org"]
+        )
+        
+        # Verify API was called
+        api_with_cache.send_multipart.assert_called_once()
+        
+        # Verify cache was updated
+        cache_stats = api_with_cache.container_cache_stats("Test FQDN Write Through")
+        assert cache_stats['cached_fqdns'] == 2
+        assert cache_stats['type'] == 'fqdn'
+        assert cache_stats['api_size'] == 2
+        
+        # Verify cached values
+        cached_values = api_with_cache.container_list_cached_values("Test FQDN Write Through")
+        assert len(cached_values['fqdns']) == 2
+        
+        # Check individual FQDNs
+        fqdns = {f['fqdn'] for f in cached_values['fqdns']}
+        assert 'example.com' in fqdns
+        assert 'test.org' in fqdns
 
 
 if __name__ == "__main__":

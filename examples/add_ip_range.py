@@ -112,7 +112,7 @@ def print_simple(response, container_name, from_ip, to_ip):
         print("The container may not exist or you may not have permission to modify it.")
         return False
     
-    print("\\n✅ IP range added successfully!\\n")
+    print("\n✅ IP range added successfully!\\n")
     print("-" * 60)
     print(f"Container:   {container.get('name', 'N/A')}")
     print(f"ID:          {container.get('id', 'N/A')}")
@@ -140,11 +140,11 @@ def print_simple(response, container_name, from_ip, to_ip):
         to_addr = ipaddress.ip_address(to_ip)
         range_size = int(to_addr) - int(from_addr) + 1
         if range_size == 1:
-            print(f"\\n💡 Successfully added 1 IP address to the container.")
+            print(f"\n💡 Successfully added 1 IP address to the container.")
         else:
-            print(f"\\n💡 Successfully added a range of {range_size} IP addresses to the container.")
+            print(f"\n💡 Successfully added a range of {range_size} IP addresses to the container.")
     except:
-        print(f"\\n💡 Successfully added IP range {from_ip} - {to_ip} to the container.")
+        print(f"\n💡 Successfully added IP range {from_ip} - {to_ip} to the container.")
     
     return True
 
@@ -267,7 +267,7 @@ IP Address Examples:
             
     except ValueError as e:
         print(f"❌ Configuration error: {e}", file=sys.stderr)
-        print("\\nPlease ensure you have set the required environment variables or provided CLI parameters.")
+        print("\nPlease ensure you have set the required environment variables or provided CLI parameters.")
         print("See --help for more information.")
         sys.exit(1)
         
@@ -292,11 +292,11 @@ IP Address Examples:
         
     except CatoNetworkError as e:
         print(f"❌ Network error: {e}", file=sys.stderr)
-        print("\\nPlease check your network connection and API endpoint URL.")
+        print("\nPlease check your network connection and API endpoint URL.")
         sys.exit(1)
         
     except KeyboardInterrupt:
-        print("\\n\\n❌ Operation cancelled by user (Ctrl+C)")
+        print("\n\n❌ Operation cancelled by user (Ctrl+C)")
         sys.exit(130)
         
     except Exception as e:

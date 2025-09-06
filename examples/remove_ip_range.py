@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """
-Example: Add FQDNs to Container in Cato Networks
+Example: Remove IP Range from Container in Cato Networks
 
-This example demonstrates how to add fully qualified domain names (FQDNs)
-to an existing FQDN container in your Cato account.
+This example demonstrates how to remove an IP address range from an existing
+IP container in your Cato account. It will also remove the range from the
+local cache if present.
 
 Usage:
-    python add_fqdns.py --container "Container Name" --fqdns "domain1.com,domain2.com" [options]
+    python remove_ip_range.py --container "Container Name" --from-ip "192.168.1.1" --to-ip "192.168.1.10" [options]
 
 Options:
-    --container NAME    Container name to add FQDNs to (required)
-    --fqdns FQDNS       Comma-separated FQDNs to add (required)
-    --fqdns-file FILE   File with FQDNs, one per line (alternative to --fqdns)
+    --container NAME    Container name to remove IPs from (required)
+    --from-ip IP        Starting IP address of the range (required)
+    --to-ip IP          Ending IP address of the range (required)
     --key KEY           API key (overrides CATO_API_KEY env var)
     --account ACCOUNT   Account ID (overrides CATO_ACCOUNT_ID env var)  
     --url URL           API URL (overrides CATO_API_URL env var)
@@ -26,24 +27,21 @@ Environment Variables:
     CATO_DEBUG         Set to 'true' to enable debug mode
 
 Examples:
-    # Add multiple FQDNs from command line
-    python add_fqdns.py --container "Blocked Domains" --fqdns "malware.com,phishing.net,spam.org"
+    # Remove a single IP (from_ip = to_ip)
+    python remove_ip_range.py --container "Blocked IPs" --from-ip "192.168.1.100" --to-ip "192.168.1.100"
     
-    # Add multiple subdomains
-    python add_fqdns.py --container "Social Media" --fqdns "m.facebook.com,api.twitter.com,cdn.instagram.com"
+    # Remove an IP range
+    python remove_ip_range.py --container "Allowed IPs" --from-ip "10.0.0.1" --to-ip "10.0.0.255"
     
-    # Add FQDNs from file
-    python add_fqdns.py --container "Corporate Domains" --fqdns-file ./additional_domains.txt
-    
-    # Add with debug output to troubleshoot
-    python add_fqdns.py --container "Test Domains" --fqdns "test1.local,test2.local" --debug
+    # Remove with debug output to troubleshoot
+    python remove_ip_range.py --container "Test IPs" --from-ip "172.16.1.1" --to-ip "172.16.1.50" --debug
     
     # Override credentials
-    python add_fqdns.py --container "External Domains" --fqdns "api.example.com" \
+    python remove_ip_range.py --container "Corporate IPs" --from-ip "203.0.113.1" --to-ip "203.0.113.100" \
         --key YOUR_KEY --account YOUR_ACCOUNT
     
     # Get JSON output for scripting
-    python add_fqdns.py --container "Test" --fqdns "example.com" --format json
+    python remove_ip_range.py --container "Test" --from-ip "127.0.0.1" --to-ip "127.0.0.1" --format json
 """
 
 import sys
@@ -51,7 +49,7 @@ import os
 import json
 import argparse
 from datetime import datetime
-import re
+import ipaddress
 
 # Add parent directory to path to import cato module
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -70,64 +68,53 @@ def format_datetime(iso_string):
         return iso_string
 
 
-def validate_fqdn(fqdn):
-    """Basic FQDN validation"""
-    if not fqdn or not isinstance(fqdn, str):
+def validate_ip_address(ip_str):
+    """Validate IP address format"""
+    try:
+        ipaddress.ip_address(ip_str)
+        return True
+    except ValueError:
         return False
-    
-    # Wildcards are not allowed in Cato API
-    if fqdn.startswith('*.'):
-        return False
-    
-    domain = fqdn
-    
-    # Basic checks: no spaces, contains dots (except localhost), reasonable length
-    if ' ' in domain:
-        return False
-    if len(fqdn) > 253:  # RFC limit
-        return False
-    if not '.' in domain and domain != 'localhost':
-        return False
-    
-    # Basic domain name pattern (no wildcards allowed)
-    pattern = r'^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$'
-    if not re.match(pattern, fqdn):
-        return False
-    
-    return True
 
 
-def validate_fqdns(fqdns):
-    """Validate a list of FQDNs"""
-    if not fqdns:
-        return []
-    
-    errors = []
-    for i, fqdn in enumerate(fqdns):
-        if not validate_fqdn(fqdn):
-            errors.append(f"Invalid FQDN at position {i+1}: '{fqdn}'")
-    
-    return errors
+def validate_ip_range(from_ip, to_ip):
+    """Validate that IP range is logical (from_ip <= to_ip)"""
+    try:
+        from_addr = ipaddress.ip_address(from_ip)
+        to_addr = ipaddress.ip_address(to_ip)
+        
+        # Must be same IP version (IPv4 or IPv6)
+        if from_addr.version != to_addr.version:
+            return False, f"IP addresses must be the same version (both IPv4 or both IPv6)"
+        
+        # from_ip should be <= to_ip
+        if from_addr > to_addr:
+            return False, f"Starting IP ({from_ip}) must be less than or equal to ending IP ({to_ip})"
+        
+        return True, None
+    except ValueError as e:
+        return False, str(e)
 
 
-def print_simple(response, container_name, fqdns):
-    """Print FQDN addition result in simple format"""
+def print_simple(response, container_name, from_ip, to_ip, cache_removed):
+    """Print IP range removal result in simple format"""
     if not response or 'data' not in response:
-        print("❌ FQDN addition failed - no data in response")
+        print("❌ IP range removal failed - no data in response")
         return False
     
     # Navigate through the response structure
     container_data = response.get('data', {}).get('container', {})
-    fqdn_data = container_data.get('fqdn', {})
-    add_data = fqdn_data.get('addValues', {})
-    container = add_data.get('container', {})
+    ip_data = container_data.get('ipAddressRange', {})
+    remove_data = ip_data.get('removeValues', {})
+    container = remove_data.get('container', {})
     
     if not container:
-        print("❌ FQDN addition failed - no container data returned")
+        print("❌ IP range removal failed - no container data returned")
         print("The container may not exist or you may not have permission to modify it.")
+        print("The IP range may not exist in the container.")
         return False
     
-    print("\n✅ FQDNs added successfully!\\n")
+    print("\n✅ IP range removed successfully!\n")
     print("-" * 60)
     print(f"Container:   {container.get('name', 'N/A')}")
     print(f"ID:          {container.get('id', 'N/A')}")
@@ -135,10 +122,17 @@ def print_simple(response, container_name, fqdns):
     print(f"Size:        {container.get('size', 0)} items")
     print(f"Type:        {container.get('__typename', 'N/A')}")
     
-    # Show the FQDNs that were added
-    print(f"Added FQDNs: {len(fqdns)} domain(s)")
-    for i, fqdn in enumerate(fqdns, 1):
-        print(f"  {i:2d}. {fqdn}")
+    # Show the range that was removed
+    if from_ip == to_ip:
+        print(f"Removed IP:  {from_ip}")
+    else:
+        print(f"Removed Range: {from_ip} - {to_ip}")
+    
+    # Show cache status
+    if cache_removed:
+        print(f"Cache:       ✅ Also removed from local cache")
+    else:
+        print(f"Cache:       ℹ️  Was not in local cache")
     
     audit = container.get('audit', {})
     if audit:
@@ -148,22 +142,32 @@ def print_simple(response, container_name, fqdns):
     
     print("-" * 60)
     
-    # User info
-    if len(fqdns) == 1:
-        print(f"\n💡 Successfully added 1 FQDN to the container.")
-    else:
-        print(f"\n💡 Successfully added {len(fqdns)} FQDNs to the container.")
+    # Calculate range size for user info
+    try:
+        from_addr = ipaddress.ip_address(from_ip)
+        to_addr = ipaddress.ip_address(to_ip)
+        range_size = int(to_addr) - int(from_addr) + 1
+        if range_size == 1:
+            print(f"\n💡 Successfully removed 1 IP address from the container.")
+        else:
+            print(f"\n💡 Successfully removed a range of {range_size} IP addresses from the container.")
+    except:
+        print(f"\n💡 Successfully removed IP range {from_ip} - {to_ip} from the container.")
     
     return True
 
 
-def print_json(response):
-    """Print full response as formatted JSON"""
-    print(json.dumps(response, indent=2))
+def print_json(response, cache_removed):
+    """Print full response as formatted JSON with cache info"""
+    output = {
+        "api_response": response,
+        "cache_removed": cache_removed
+    }
+    print(json.dumps(output, indent=2))
     return bool(response and 'data' in response and response['data'])
 
 
-def validate_inputs(container_name, fqdns):
+def validate_inputs(container_name, from_ip, to_ip):
     """Validate required inputs"""
     errors = []
     
@@ -172,52 +176,48 @@ def validate_inputs(container_name, fqdns):
     elif len(container_name) > 255:
         errors.append("Container name must be 255 characters or less")
     
-    if not fqdns or len(fqdns) == 0:
-        errors.append("At least one FQDN is required")
-    else:
-        # Validate individual FQDNs
-        fqdn_errors = validate_fqdns(fqdns)
-        errors.extend(fqdn_errors)
-        
-        # Check for duplicates
-        seen_fqdns = set()
-        for i, fqdn in enumerate(fqdns):
-            if fqdn in seen_fqdns:
-                errors.append(f"Duplicate FQDN at position {i+1}: '{fqdn}'")
-            seen_fqdns.add(fqdn)
+    if not from_ip or not from_ip.strip():
+        errors.append("Starting IP address is required")
+    elif not validate_ip_address(from_ip.strip()):
+        errors.append(f"Invalid starting IP address: '{from_ip}'")
+    
+    if not to_ip or not to_ip.strip():
+        errors.append("Ending IP address is required")
+    elif not validate_ip_address(to_ip.strip()):
+        errors.append(f"Invalid ending IP address: '{to_ip}'")
+    
+    # Validate IP range if both IPs are valid
+    if not errors or len([e for e in errors if 'IP address' in e]) == 0:
+        valid_range, range_error = validate_ip_range(from_ip.strip(), to_ip.strip())
+        if not valid_range:
+            errors.append(range_error)
     
     return errors
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Add FQDNs to an existing FQDN container in Cato Networks',
+        description='Remove an IP range from an existing container in Cato Networks',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-This adds fully qualified domain names (FQDNs) to an existing FQDN container.
+This removes an IP address range from an existing IP container in your Cato account.
+It will also remove the range from the local cache if present.
 Environment variables can be set in a .env file in the parent directory.
 See .env.example for a template.
 
 ⚠️  WARNING: This will modify an existing container in your Cato account.
 Make sure you have the necessary permissions before running this command.
 
-FQDN Examples:
-  - Standard domains: example.com, subdomain.example.com
-  - Subdomains: mail.example.com, api.example.com
-  - Local domains: test.local, dev.internal
-  - API endpoints: api.github.com, api.example.org
-
-Note: Wildcards (e.g., *.example.com) are not supported by the Cato API
+IP Address Examples:
+  - Single IP: --from-ip "192.168.1.100" --to-ip "192.168.1.100"
+  - IP Range:  --from-ip "10.0.0.1" --to-ip "10.0.0.255"
+  - IPv6:      --from-ip "2001:db8::1" --to-ip "2001:db8::100"
         """
     )
     
-    parser.add_argument('--container', required=True, help='Container name to add FQDNs to (required)')
-    
-    # FQDN input options (mutually exclusive)
-    fqdn_group = parser.add_mutually_exclusive_group(required=True)
-    fqdn_group.add_argument('--fqdns', help='Comma-separated FQDNs to add (required)')
-    fqdn_group.add_argument('--fqdns-file', help='File with FQDNs, one per line')
-    
+    parser.add_argument('--container', required=True, help='Container name to remove IPs from (required)')
+    parser.add_argument('--from-ip', required=True, help='Starting IP address of the range (required)')
+    parser.add_argument('--to-ip', required=True, help='Ending IP address of the range (required)')
     parser.add_argument('--key', help='API key (overrides CATO_API_KEY env var)')
     parser.add_argument('--account', help='Account ID (overrides CATO_ACCOUNT_ID env var)')
     parser.add_argument('--url', help='API URL (overrides CATO_API_URL env var)')
@@ -235,33 +235,17 @@ Note: Wildcards (e.g., *.example.com) are not supported by the Cato API
     
     args = parser.parse_args()
     
-    # Process FQDNs
-    fqdns = None
-    if args.fqdns_file:
-        try:
-            with open(args.fqdns_file, 'r') as f:
-                fqdns = [line.strip() for line in f if line.strip()]
-            print(f"Loaded {len(fqdns)} FQDNs from {args.fqdns_file}")
-        except FileNotFoundError:
-            print(f"❌ Error: File '{args.fqdns_file}' not found", file=sys.stderr)
-            sys.exit(1)
-        except Exception as e:
-            print(f"❌ Error reading file: {e}", file=sys.stderr)
-            sys.exit(1)
-    elif args.fqdns:
-        # Parse comma-separated FQDNs
-        fqdns = [fqdn.strip() for fqdn in args.fqdns.split(',') if fqdn.strip()]
-        print(f"Processing {len(fqdns)} FQDNs from command line")
-    
     # Validate inputs
-    validation_errors = validate_inputs(args.container, fqdns)
+    validation_errors = validate_inputs(args.container, args.from_ip, args.to_ip)
     if validation_errors:
         print("❌ Validation errors:", file=sys.stderr)
         for error in validation_errors:
             print(f"  - {error}", file=sys.stderr)
         sys.exit(1)
     
-    # Clean up inputs
+    # Clean up IP addresses
+    from_ip = args.from_ip.strip()
+    to_ip = args.to_ip.strip()
     container_name = args.container.strip()
     
     try:
@@ -273,22 +257,28 @@ Note: Wildcards (e.g., *.example.com) are not supported by the Cato API
             debug=args.debug
         )
         
-        if len(fqdns) == 1:
-            print(f"Adding FQDN '{fqdns[0]}' to container '{container_name}'...")
-        else:
-            print(f"Adding {len(fqdns)} FQDNs to container '{container_name}'...")
+        # Check if the IP range is in cache before removal
+        cache_had_range = False
+        if api._cache:
+            cache_had_range = api._cache.has_ip_range(container_name, from_ip, to_ip)
         
-        # Add the FQDNs to the container
-        response = api.container_add_fqdns(
+        if from_ip == to_ip:
+            print(f"Removing IP address '{from_ip}' from container '{container_name}'...")
+        else:
+            print(f"Removing IP range '{from_ip}' - '{to_ip}' from container '{container_name}'...")
+        
+        # Remove the IP range from the container (API call also removes from cache)
+        response = api.container_remove_ip_range(
             container_name=container_name,
-            fqdns=fqdns
+            from_ip=from_ip,
+            to_ip=to_ip
         )
         
         # Format and print output
         if args.format == 'json':
-            success = print_json(response)
+            success = print_json(response, cache_had_range)
         else:
-            success = print_simple(response, container_name, fqdns)
+            success = print_simple(response, container_name, from_ip, to_ip, cache_had_range)
         
         if not success:
             sys.exit(1)
@@ -308,12 +298,9 @@ Note: Wildcards (e.g., *.example.com) are not supported by the Cato API
                     # Check for common error patterns
                     if 'not found' in message.lower():
                         print(f"  ℹ️  Container '{container_name}' may not exist or you don't have access to it", file=sys.stderr)
+                        print(f"  ℹ️  Or the IP range may not exist in the container", file=sys.stderr)
                     elif 'permission' in message.lower() or 'denied' in message.lower():
                         print(f"  ℹ️  You don't have permission to modify this container", file=sys.stderr)
-                    elif 'duplicate' in message.lower() or 'already exists' in message.lower():
-                        print(f"  ℹ️  Some FQDNs may already exist in this container", file=sys.stderr)
-                    elif 'invalid' in message.lower():
-                        print(f"  ℹ️  One or more FQDNs may be invalid or malformed", file=sys.stderr)
                     else:
                         print(f"  - {message}", file=sys.stderr)
                 else:

@@ -446,13 +446,42 @@ mutation createIpAddressRangeContainerFromFile($accountId:ID!, $input:CreateIpAd
 			files = {
 				"variables.input.uploadFile": (f"{name}.csv", csv_content)
 			}
-			return self.send_multipart(operation, variables, query, files)
+			response = self.send_multipart(operation, variables, query, files)
 		else:
 			# Create empty container - still needs an empty file
 			files = {
 				"variables.input.uploadFile": (f"{name}.csv", "")
 			}
-			return self.send_multipart(operation, variables, query, files)
+			response = self.send_multipart(operation, variables, query, files)
+		
+		# Write-through cache: Update cache when container is successfully created
+		if self._cache and response.get("data") and not response.get("errors"):
+			try:
+				container_data = response["data"]["container"]["ipAddressRange"]["createFromFile"]["container"]
+				container_size = container_data.get("size", 0)
+				
+				# Update container metadata in cache
+				self._cache.update_container_metadata(name, "ip", container_size)
+				
+				# If IP addresses were provided, cache them
+				if ip_addresses and container_size > 0:
+					for ip_addr in ip_addresses:
+						# Handle both single IPs and ranges
+						if '/' in ip_addr:
+							# CIDR notation - treat as range
+							self._cache.add_ip_range(name, ip_addr, ip_addr)
+						elif '-' in ip_addr:
+							# Range notation (e.g., "1.1.1.1-1.1.1.10")
+							from_ip, to_ip = ip_addr.split('-', 1)
+							self._cache.add_ip_range(name, from_ip.strip(), to_ip.strip())
+						else:
+							# Single IP - same from and to
+							self._cache.add_ip_range(name, ip_addr, ip_addr)
+			except Exception:
+				# Don't fail container creation if cache update fails
+				pass
+		
+		return response
 
 
 	def container_create_fqdn(self, name, description, fqdns=None, account_id=None):
@@ -513,13 +542,32 @@ mutation createFqdnContainerFromFile($accountId:ID!, $input:CreateFqdnContainerF
 			files = {
 				"variables.input.uploadFile": (f"{name}.csv", csv_content)
 			}
-			return self.send_multipart(operation, variables, query, files)
+			response = self.send_multipart(operation, variables, query, files)
 		else:
 			# Create empty container - still needs an empty file
 			files = {
 				"variables.input.uploadFile": (f"{name}.csv", "")
 			}
-			return self.send_multipart(operation, variables, query, files)
+			response = self.send_multipart(operation, variables, query, files)
+		
+		# Write-through cache: Update cache when container is successfully created
+		if self._cache and response.get("data") and not response.get("errors"):
+			try:
+				container_data = response["data"]["container"]["fqdn"]["createFromFile"]["container"]
+				container_size = container_data.get("size", 0)
+				
+				# Update container metadata in cache
+				self._cache.update_container_metadata(name, "fqdn", container_size)
+				
+				# If FQDNs were provided, cache them
+				if fqdns and container_size > 0:
+					for fqdn in fqdns:
+						self._cache.add_fqdn(name, fqdn.strip())
+			except Exception:
+				# Don't fail container creation if cache update fails
+				pass
+		
+		return response
 
 
 	def container_add_ip_range(self, container_name, from_ip, to_ip, account_id=None):
