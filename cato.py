@@ -903,6 +903,7 @@ query listContainers($accountId:ID!, $input:ContainerSearchInput!)  {
 	container(accountId: $accountId) {
 		list(input: $input) {
 			containers {
+				__typename
 				id
 				name
 				description
@@ -1103,9 +1104,13 @@ query listContainers($accountId:ID!, $input:ContainerSearchInput!)  {
 		
 		if (api_response.get("data", {}).get("container", {}).get("list", {}).get("containers")):
 			for container in api_response["data"]["container"]["list"]["containers"]:
+				# Use __typename to determine container type more accurately
+				typename = container.get('__typename', '')
+				container_type = 'ip' if typename == 'IpAddressRangeContainer' else 'fqdn'
+				
 				api_containers[container['name']] = {
 					'name': container['name'],
-					'type': 'ip' if container.get('containerType') == 'IP_RANGE' else 'fqdn',
+					'type': container_type,
 					'size': container.get('size', 0)
 				}
 		

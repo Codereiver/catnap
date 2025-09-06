@@ -50,6 +50,17 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from cato import API, CatoNetworkError, CatoGraphQLError
 
 
+def get_container_type(container):
+    """Extract container type from __typename field"""
+    typename = container.get('__typename', '')
+    if typename == 'IpAddressRangeContainer':
+        return 'IP'
+    elif typename == 'FqdnContainer':
+        return 'FQDN'
+    else:
+        return 'Unknown'
+
+
 def format_datetime(iso_string):
     """Convert ISO datetime string to readable format"""
     if not iso_string:
@@ -81,6 +92,7 @@ def print_simple(response):
     print("-" * 60)
     print(f"ID:          {container.get('id', 'N/A')}")
     print(f"Name:        {container.get('name', 'N/A')}")
+    print(f"Type:        {get_container_type(container)}")
     print(f"Description: {container.get('description', 'N/A')}")
     print(f"Size:        {container.get('size', 0)} items (before deletion)")
     

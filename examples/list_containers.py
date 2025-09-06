@@ -53,6 +53,17 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from cato import API, CatoNetworkError, CatoGraphQLError
 
 
+def get_container_type(container):
+    """Extract container type from __typename field"""
+    typename = container.get('__typename', '')
+    if typename == 'IpAddressRangeContainer':
+        return 'IP'
+    elif typename == 'FqdnContainer':
+        return 'FQDN'
+    else:
+        return 'Unknown'
+
+
 def format_datetime(iso_string):
     """Convert ISO datetime string to readable format"""
     if not iso_string:
@@ -76,6 +87,7 @@ def print_simple(containers):
     for container in containers:
         print(f"ID:          {container.get('id', 'N/A')}")
         print(f"Name:        {container.get('name', 'N/A')}")
+        print(f"Type:        {get_container_type(container)}")
         print(f"Description: {container.get('description', 'N/A')}")
         print(f"Size:        {container.get('size', 'N/A')}")
         
@@ -123,16 +135,17 @@ def print_table(containers):
     
     # Print header
     if has_cache_info:
-        print(f"\n{'ID':<{id_width}} {'Name':<{name_width}} {'Description':<{desc_width}} {'Size':<6} {'Cached':<7} {'Cache':<12} {'Modified':<20}")
-        print("-" * (id_width + name_width + desc_width + 6 + 7 + 12 + 20 + 7))
+        print(f"\n{'ID':<{id_width}} {'Name':<{name_width}} {'Type':<6} {'Description':<{desc_width}} {'Size':<6} {'Cached':<7} {'Cache':<12} {'Modified':<20}")
+        print("-" * (id_width + name_width + 6 + desc_width + 6 + 7 + 12 + 20 + 8))
     else:
-        print(f"\n{'ID':<{id_width}} {'Name':<{name_width}} {'Description':<{desc_width}} {'Size':<10} {'Modified':<20}")
-        print("-" * (id_width + name_width + desc_width + 10 + 20 + 4))
+        print(f"\n{'ID':<{id_width}} {'Name':<{name_width}} {'Type':<6} {'Description':<{desc_width}} {'Size':<10} {'Modified':<20}")
+        print("-" * (id_width + name_width + 6 + desc_width + 10 + 20 + 5))
     
     # Print rows
     for container in containers:
         container_id = str(container.get('id', 'N/A'))[:id_width]
         name = str(container.get('name', 'N/A'))[:name_width]
+        container_type = get_container_type(container)
         description = str(container.get('description', 'N/A'))[:desc_width]
         size = str(container.get('size', 'N/A'))[:6]
         
@@ -151,9 +164,9 @@ def print_table(containers):
             else:
                 cache_summary = "-"[:12]
             
-            print(f"{container_id:<{id_width}} {name:<{name_width}} {description:<{desc_width}} {size:<6} {cached_status:<7} {cache_summary:<12} {modified:<20}")
+            print(f"{container_id:<{id_width}} {name:<{name_width}} {container_type:<6} {description:<{desc_width}} {size:<6} {cached_status:<7} {cache_summary:<12} {modified:<20}")
         else:
-            print(f"{container_id:<{id_width}} {name:<{name_width}} {description:<{desc_width}} {size:<10} {modified:<20}")
+            print(f"{container_id:<{id_width}} {name:<{name_width}} {container_type:<6} {description:<{desc_width}} {size:<10} {modified:<20}")
 
 
 def print_json(response):
