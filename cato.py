@@ -477,9 +477,12 @@ mutation createIpAddressRangeContainerFromFile($accountId:ID!, $input:CreateIpAd
 						else:
 							# Single IP - same from and to
 							self._cache.add_ip_range(name, ip_addr, ip_addr)
-			except Exception:
-				# Don't fail container creation if cache update fails
-				pass
+			except Exception as e:
+				# Don't fail container creation if cache update fails, but log the issue
+				if self._debug:
+					print(f"DEBUG: Failed to update cache after creating IP container '{name}': {e}")
+				import sys
+				print(f"Warning: Cache update failed after creating container '{name}': {e}", file=sys.stderr)
 		
 		return response
 
@@ -563,9 +566,12 @@ mutation createFqdnContainerFromFile($accountId:ID!, $input:CreateFqdnContainerF
 				if fqdns and container_size > 0:
 					for fqdn in fqdns:
 						self._cache.add_fqdn(name, fqdn.strip())
-			except Exception:
-				# Don't fail container creation if cache update fails
-				pass
+			except Exception as e:
+				# Don't fail container creation if cache update fails, but log the issue
+				if self._debug:
+					print(f"DEBUG: Failed to update cache after creating FQDN container '{name}': {e}")
+				import sys
+				print(f"Warning: Cache update failed after creating container '{name}': {e}", file=sys.stderr)
 		
 		return response
 
@@ -925,10 +931,15 @@ mutation deleteContainer($accountId:ID!, $input:DeleteContainerInput!) {
 		# Clear cache entries when container is successfully deleted
 		if self._cache and response.get("data") and not response.get("errors"):
 			try:
-				self._cache.clear_container(name)
-			except Exception:
-				# Don't fail the deletion if cache cleanup fails
-				pass
+				deleted_count = self._cache.clear_container(name)
+				if self._debug:
+					print(f"DEBUG: Cleared {deleted_count[0]} IP ranges and {deleted_count[1]} FQDNs from cache for container '{name}'")
+			except Exception as e:
+				# Don't fail the deletion if cache cleanup fails, but log the issue
+				if self._debug:
+					print(f"DEBUG: Failed to clear cache for container '{name}': {e}")
+				import sys
+				print(f"Warning: Cache cleanup failed for container '{name}': {e}", file=sys.stderr)
 		
 		return response
 
