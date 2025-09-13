@@ -16,6 +16,55 @@ from cato import API, CatoAPIError, CatoNetworkError, CatoGraphQLError
 load_dotenv()
 
 
+@pytest.fixture(scope="session", autouse=True)
+def session_cleanup():
+    """Session-level cleanup that runs after all tests"""
+    yield  # Run all tests first
+    
+    # After all tests complete, clean up any remaining test containers from cache
+    try:
+        api = API()
+        if api._cache:
+            validation_result = api.container_validate_cache_integrity()
+            
+            # Find test containers in cache that don't exist in API
+            orphaned_test_containers = []
+            for container_info in validation_result['checks']['cache_to_api']['missing_in_api']:
+                container_name = container_info['name']
+                # Identify test containers by common patterns
+                if (container_name.startswith('pytest_test_') or 
+                    container_name.startswith('test_') or
+                    'test' in container_name.lower() or
+                    container_name in ['Test Container', 'FQDN Container', 'Empty Container', 
+                                     'Empty FQDN Container', 'Variable Test Container']):
+                    orphaned_test_containers.append(container_name)
+            
+            if orphaned_test_containers:
+                print(f"\n🧹 Session cleanup: Removing {len(orphaned_test_containers)} orphaned test containers from cache")
+                for container_name in orphaned_test_containers:
+                    try:
+                        deleted_count = api._cache.clear_container(container_name)
+                        print(f"   ✅ Cleared '{container_name}': {deleted_count[0]} IPs, {deleted_count[1]} FQDNs")
+                    except Exception as e:
+                        print(f"   ⚠️  Failed to clear '{container_name}': {e}")
+                print("✅ Session cleanup completed")
+            
+    except Exception as e:
+        print(f"⚠️  Session cleanup failed: {e}")
+
+
+# Test containers that may be created during testing
+TEST_CONTAINER_PATTERNS = [
+    'pytest_test_',
+    'test_',
+    'Test Container',
+    'FQDN Container', 
+    'Empty Container',
+    'Empty FQDN Container',
+    'Variable Test Container'
+]
+
+
 class TestExceptions:
     """Test custom exception classes"""
     
@@ -757,6 +806,107 @@ class TestIntegration:
         import time
         timestamp = int(time.time())
         return f"pytest_test_container_{timestamp}"
+    
+    @pytest.fixture
+    def cache_cleanup_validator(self, api_with_env_credentials):
+        """Fixture to validate cache consistency after tests and cleanup if needed"""
+        created_containers = []
+        
+        def register_container(container_name):
+            """Register a container name for cleanup validation"""
+            created_containers.append(container_name)
+        
+        # Provide the register function to the test
+        yield register_container
+        
+        # After test completion, validate cache and cleanup
+        if api_with_env_credentials and api_with_env_credentials._cache:
+            try:
+                # Run cache integrity validation
+                validation_result = api_with_env_credentials.container_validate_cache_integrity()
+                
+                # Check for containers that were created during tests but are orphaned
+                orphaned_test_containers = []
+                for container_info in validation_result['checks']['cache_to_api']['missing_in_api']:
+                    container_name = container_info['name']
+                    # Check if this looks like a test container
+                    if (container_name.startswith('pytest_test_') or 
+                        container_name in created_containers or
+                        'test' in container_name.lower()):
+                        orphaned_test_containers.append(container_name)
+                
+                # Clean up orphaned test containers from cache
+                if orphaned_test_containers:
+                    print(f"\n🧹 Cache cleanup: Removing {len(orphaned_test_containers)} orphaned test containers from cache")
+                    for container_name in orphaned_test_containers:
+                        try:
+                            deleted_count = api_with_env_credentials._cache.clear_container(container_name)
+                            print(f"   ✅ Cleared cache for '{container_name}': {deleted_count[0]} IPs, {deleted_count[1]} FQDNs")
+                        except Exception as e:
+                            print(f"   ⚠️  Failed to clear cache for '{container_name}': {e}")
+                
+                # Report cache status
+                if validation_result['overall_status'] == 'FAIL':
+                    # Only warn about non-test containers
+                    non_test_orphans = [c for c in validation_result['checks']['cache_to_api']['missing_in_api'] 
+                                       if not (c['name'].startswith('pytest_test_') or 'test' in c['name'].lower())]
+                    if non_test_orphans:
+                        print(f"⚠️  Warning: {len(non_test_orphans)} non-test containers found in cache but not in API")
+                        print("   Run 'python examples/cache_maintenance.py validate --fix' to clean up")
+                
+            except Exception as e:
+                print(f"⚠️  Cache validation failed: {e}")
+    
+    def test_cache_integrity_validation(self, has_credentials, api_with_env_credentials):
+        """Test cache integrity validation functionality"""
+        if not has_credentials or not api_with_env_credentials:
+            pytest.skip("Skipping cache integrity test - no credentials in .env")
+        
+        # Test the cache validation method
+        try:
+            validation_result = api_with_env_credentials.container_validate_cache_integrity()
+            
+            # Verify response structure
+            assert isinstance(validation_result, dict)
+            assert 'timestamp' in validation_result
+            assert 'api_containers_count' in validation_result
+            assert 'cache_containers_count' in validation_result
+            assert 'checks' in validation_result
+            assert 'overall_status' in validation_result
+            assert 'summary' in validation_result
+            
+            # Verify check structure
+            checks = validation_result['checks']
+            assert 'api_to_cache' in checks
+            assert 'cache_to_api' in checks
+            assert 'size_consistency' in checks
+            
+            # Each check should have 'passed' field
+            for check_data in checks.values():
+                assert 'passed' in check_data
+                assert isinstance(check_data['passed'], bool)
+            
+            # Overall status should be PASS or FAIL
+            assert validation_result['overall_status'] in ['PASS', 'FAIL']
+            
+            print(f"✅ Cache integrity validation completed: {validation_result['overall_status']}")
+            print(f"   API containers: {validation_result['api_containers_count']}")
+            print(f"   Cache containers: {validation_result['cache_containers_count']}")
+            print(f"   Containers validated: {validation_result['summary']['containers_validated']}")
+            
+            # Report any issues found
+            if validation_result['overall_status'] == 'FAIL':
+                summary = validation_result['summary']
+                if summary['containers_missing_in_cache'] > 0:
+                    print(f"   ⚠️  {summary['containers_missing_in_cache']} containers missing in cache")
+                if summary['containers_missing_in_api'] > 0:
+                    print(f"   ⚠️  {summary['containers_missing_in_api']} orphaned containers in cache")
+                if summary['containers_with_size_mismatch'] > 0:
+                    print(f"   ⚠️  {summary['containers_with_size_mismatch']} containers with size mismatches")
+            
+        except Exception as e:
+            print(f"❌ Cache integrity validation failed: {e}")
+            raise
     
     def test_container_list_with_real_api(self, has_credentials, api_with_env_credentials):
         """Test container_list with real API call using .env credentials"""
